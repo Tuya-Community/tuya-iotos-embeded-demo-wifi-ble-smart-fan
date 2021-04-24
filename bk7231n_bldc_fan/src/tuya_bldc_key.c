@@ -1,13 +1,13 @@
 /*
  * @Author: yj 
  * @email: shiliu.yang@tuya.com
- * @LastEditors: yj 
+ * @LastEditors: shiliu
  * @file name: tuya_bldc_key.c
  * @Description: 
  * @Copyright: HANGZHOU TUYA INFORMATION TECHNOLOGY CO.,LTD
  * @Company: http://www.tuya.com
  * @Date: 2021-02-22 15:10:00
- * @LastEditTime: 2021-02-22 15:10:00
+ * @LastEditTime: 2021-04-24 09:50:55
  */
 
 #include "tuya_bldc_key.h"
@@ -18,6 +18,10 @@
 #include "tuya_bldc_system.h"
 #include "tuya_bldc_led.h"
 #include "BkDriverGpio.h"
+#include "tuya_hal_semaphore.h"
+#include "FreeRTOS.h"
+#include "task.h"
+#include "uni_thread.h"
 
 #define KEY_TIMER TY_GPIOA_14
 #define KEY_POWER TY_GPIOA_15
@@ -30,44 +34,38 @@ KEY_USER_DEF_S KEY_DEF_T;
 
 extern UINT_T g_fan_speed_gear[];
 
-STATIC VOID_T knod_key_cb(VOID_T)
+void key_rotary_task(void)
 {
     INT8_T current_gear;
-    //如果关机，不执行任何操作
-    if (fan_state.on_off == FALSE) {
-        return;
-    }
 
-    BkGpioFinalize(KEY_ROTARY_A);
-
-    //得到当前档位
-    current_gear = get_cur_gear();
-
-    if(tuya_gpio_read(KEY_ROTARY_A) != tuya_gpio_read(KEY_ROTARY_B)) {
-        PR_DEBUG("A != B"); //顺时针方向
-        current_gear++;
-        if (current_gear > (MAX_GEAR_NUMBER-1)) {
-            current_gear = (MAX_GEAR_NUMBER-1);
+    while(1) {
+        //得到当前档位
+        current_gear = get_cur_gear();
+        if((tuya_gpio_read(KEY_ROTARY_A) == FALSE) && (fan_state.on_off != FALSE)) {
+            while(tuya_gpio_read(KEY_ROTARY_A) == FALSE);
+            if(tuya_gpio_read(KEY_ROTARY_A) != tuya_gpio_read(KEY_ROTARY_B)) {
+                PR_NOTICE("A != B"); //顺时针方向
+                current_gear++;
+                if (current_gear > (MAX_GEAR_NUMBER-1)) {
+                    current_gear = (MAX_GEAR_NUMBER-1);
+                }
+                fan_state.speed = g_fan_speed_gear[current_gear];
+            } else {
+                PR_NOTICE("A == B"); //逆时针方向
+                current_gear--;
+                if (current_gear < 0) {
+                    current_gear = 0;
+                }
+                fan_state.speed = g_fan_speed_gear[current_gear];
+            }
+            /* 改变风扇状态：风速，模式，LED */
+            change_fan_state();
+            write_flash_fan_state();
+            
+            PR_NOTICE("fan current_gear is : %d", current_gear);
         }
-        fan_state.speed = g_fan_speed_gear[current_gear];
-
-    } else {
-        PR_DEBUG("A == B"); //逆时针方向
-        current_gear--;
-        if (current_gear < 0) {
-            current_gear = 0;
-        }
-        fan_state.speed = g_fan_speed_gear[current_gear];
+        tuya_hal_system_sleep(50);
     }
-
-    /* 改变风扇状态：风速，模式，LED */
-    change_fan_state();
-    write_flash_fan_state();
-    
-    PR_DEBUG("fan current_gear is : %d", current_gear);
-
-    /* 旋钮正反转检测初始化 */
-    BkGpioEnableIRQ(KEY_ROTARY_A, IRQ_TRIGGER_FALLING_EDGE, knod_key_cb, NULL);
 }
 
 STATIC VOID_T key_press_cb(TY_GPIO_PORT_E port,PUSH_KEY_TYPE_E type,INT_T cnt)
@@ -174,9 +172,6 @@ VOID_T fan_key_init(VOID_T)
     tuya_gpio_inout_set(KEY_ROTARY_A, TRUE);
     tuya_gpio_inout_set(KEY_ROTARY_B, TRUE);
 
-    /* 旋钮正反转检测初始化 */
-    BkGpioEnableIRQ(KEY_ROTARY_A, IRQ_TRIGGER_FALLING_EDGE, knod_key_cb, NULL);
-
     opRet = key_init(NULL, 0, 0);
     if (opRet != OPRT_OK) {
         PR_ERR("key_init err:%d", opRet);
@@ -210,4 +205,6 @@ VOID_T fan_key_init(VOID_T)
         PR_ERR("reg_proc_key err:%d", opRet);
         return;
     }
+
+    tuya_hal_thread_create(NULL, "key_rotary_task", 512*4, TRD_PRIO_5, key_rotary_task, NULL);
 }

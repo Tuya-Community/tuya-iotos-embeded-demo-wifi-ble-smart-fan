@@ -1,13 +1,13 @@
 /*
  * @Author: yj 
  * @email: shiliu.yang@tuya.com
- * @LastEditors: yj 
+ * @LastEditors: shiliu
  * @file name: tuya_bldc_flash.c
  * @Description: 
  * @Copyright: HANGZHOU TUYA INFORMATION TECHNOLOGY CO.,LTD
  * @Company: http://www.tuya.com
  * @Date: 2021-02-22 15:10:00
- * @LastEditTime: 2021-02-22 15:10:00
+ * @LastEditTime: 2021-04-24 09:49:44
  */
 
 #include "soc_flash.h"
